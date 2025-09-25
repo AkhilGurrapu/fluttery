@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Allotment } from 'allotment'
 import CodeEditor from './CodeEditor'
-import { ArrowLeft, Send, Folder, File, Play, Download, Settings, Share, Smartphone, FolderOpen, ChevronRight, ChevronDown } from 'lucide-react'
+import { ArrowLeft, Send, Folder, File, Play, Download, Settings, Share, Smartphone, FolderOpen, ChevronRight, ChevronDown, Code, X, Tabs } from 'lucide-react'
 import 'allotment/dist/style.css'
 
 interface FileTreeItem {
@@ -36,6 +36,11 @@ export default function ChatDevEnvironment({ initialPrompt, appType, onBack }: C
   const [files, setFiles] = useState<FileTreeItem[]>([])
   const [activeFile, setActiveFile] = useState<string>('')
   const [activeFileContent, setActiveFileContent] = useState<string>('')
+  const [sessionId, setSessionId] = useState<string>('')
+  const [previewUrl, setPreviewUrl] = useState<string>('')
+  const [sessionStatus, setSessionStatus] = useState<'initializing' | 'ready' | 'error'>('initializing')
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(true)
+  const [activeTab, setActiveTab] = useState('main')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -53,6 +58,7 @@ export default function ChatDevEnvironment({ initialPrompt, appType, onBack }: C
 
   const generateInitialApp = async () => {
     setIsGenerating(true)
+    setSessionStatus('initializing')
 
     // Add user message
     const userMessage: Message = {
@@ -67,60 +73,56 @@ export default function ChatDevEnvironment({ initialPrompt, appType, onBack }: C
     const thinkingMessage: Message = {
       id: (Date.now() + 1).toString(),
       type: 'assistant',
-      content: 'I\'ll help you build this Flutter app. Let me analyze your requirements and create the project structure...',
+      content: 'I\'ll help you build this Flutter app. Creating a new Flutter session and setting up your project...',
       timestamp: new Date()
     }
     setMessages(prev => [...prev, thinkingMessage])
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/generate`, {
+      // Create session with initial prompt
+      const sessionResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt: initialPrompt,
-          projectContext: {
-            name: projectName,
-            firebase: true,
-            appType: appType
-          }
+          initialPrompt: initialPrompt,
+          appType: appType
         }),
       })
 
-      if (response.ok) {
-        const data = await response.json()
+      if (sessionResponse.ok) {
+        const sessionData = await sessionResponse.json()
+        setSessionId(sessionData.session.id)
+        setPreviewUrl(sessionData.session.previewUrl)
+        setSessionStatus('ready')
 
         // Update the thinking message with success
         const successMessage: Message = {
           id: (Date.now() + 2).toString(),
           type: 'assistant',
-          content: `Perfect! I've created your Flutter app: "${data.explanation || 'A beautiful Flutter application'}".\n\nHere's what I've generated:\n\n${data.files ? data.files.map((f: any) => `📄 ${f.path}`).join('\n') : '📄 lib/main.dart'}\n\nThe app is ready to run! You can see the code in the editor and make any changes you'd like.`,
-          timestamp: new Date(),
-          files: data.files || [{ path: 'lib/main.dart', content: data.code }]
+          content: `Perfect! I've created your Flutter app session and generated your initial app.\n\nYour app is now running at: ${sessionData.session.previewUrl}\n\nThe app is ready to run! You can see the preview in the right panel and make changes through this chat.`,
+          timestamp: new Date()
         }
 
         setMessages(prev => [...prev.slice(0, -1), successMessage])
 
-        // Set up files
-        const generatedFiles = data.files || [{ path: 'lib/main.dart', content: data.code }]
-        setFiles(createFileTree(generatedFiles))
-
-        // Set first file as active
-        if (generatedFiles.length > 0) {
-          setActiveFile(generatedFiles[0].path)
-          setActiveFileContent(generatedFiles[0].content)
-        }
+        // Set up basic file structure (we'll get actual files from the session later if needed)
+        const basicFiles = [{ path: 'lib/main.dart', content: getBasicTemplate() }]
+        setFiles(createFileTree(basicFiles))
+        setActiveFile('lib/main.dart')
+        setActiveFileContent(getBasicTemplate())
 
       } else {
-        throw new Error('Failed to generate code')
+        throw new Error(`Failed to create session: ${sessionResponse.statusText}`)
       }
     } catch (error) {
-      console.error('Error generating code:', error)
+      console.error('Error creating session:', error)
+      setSessionStatus('error')
       const errorMessage: Message = {
         id: (Date.now() + 3).toString(),
         type: 'assistant',
-        content: 'I apologize, but I encountered an error generating your app. Let me create a basic template for you to get started.',
+        content: 'I apologize, but I encountered an error setting up your Flutter session. This might be due to server configuration issues. Let me create a basic template for you to get started.',
         timestamp: new Date()
       }
       setMessages(prev => [...prev.slice(0, -1), errorMessage])
@@ -237,7 +239,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isGenerating) return
+    if (!inputMessage.trim() || isGenerating || !sessionId) return
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -254,21 +256,19 @@ class _HomePageState extends State<HomePage> {
     const thinkingMessage: Message = {
       id: (Date.now() + 1).toString(),
       type: 'assistant',
-      content: 'Let me help you with that modification...',
+      content: 'Let me help you with that modification and update your Flutter app...',
       timestamp: new Date()
     }
     setMessages(prev => [...prev, thinkingMessage])
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/generate`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/code`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt: inputMessage,
-          currentCode: activeFileContent,
-          projectContext: { name: projectName, firebase: true }
+          prompt: inputMessage
         }),
       })
 
@@ -278,26 +278,31 @@ class _HomePageState extends State<HomePage> {
         const successMessage: Message = {
           id: (Date.now() + 2).toString(),
           type: 'assistant',
-          content: `I've updated your Flutter app based on your request. Here are the changes:\n\n${data.explanation || 'Code has been updated successfully!'}`,
+          content: `I've updated your Flutter app based on your request!\n\nYour changes have been applied and the app has been hot reloaded.\n\nYou can see the updated preview at: ${previewUrl}`,
           timestamp: new Date(),
-          files: data.files || [{ path: activeFile, content: data.code }]
+          files: data.files || []
         }
 
         setMessages(prev => [...prev.slice(0, -1), successMessage])
 
-        // Update files if we got multiple files
-        if (data.files) {
+        // Update files if we got file information
+        if (data.files && data.files.length > 0) {
           setFiles(createFileTree(data.files))
-        } else if (data.code) {
-          setActiveFileContent(data.code)
+          // Update active file if it exists in the new files
+          const currentFile = data.files.find((f: any) => f.path === activeFile)
+          if (currentFile) {
+            setActiveFileContent(currentFile.content)
+          }
         }
+      } else {
+        throw new Error(`Failed to update code: ${response.statusText}`)
       }
     } catch (error) {
-      console.error('Error:', error)
+      console.error('Error updating code:', error)
       const errorMessage: Message = {
         id: (Date.now() + 3).toString(),
         type: 'assistant',
-        content: 'I encountered an error processing your request. Please try again.',
+        content: `I encountered an error processing your request: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again or check if the session is still active.`,
         timestamp: new Date()
       }
       setMessages(prev => [...prev.slice(0, -1), errorMessage])
@@ -306,36 +311,70 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  const toggleFolderExpansion = (folderPath: string) => {
+    const updateItems = (items: FileTreeItem[]): FileTreeItem[] => {
+      return items.map(item => {
+        if (item.path === folderPath && item.type === 'folder') {
+          return { ...item, expanded: !item.expanded }
+        }
+        if (item.children) {
+          return { ...item, children: updateItems(item.children) }
+        }
+        return item
+      })
+    }
+    setFiles(updateItems(files))
+  }
+
   const renderFileTree = (items: FileTreeItem[], level = 0): JSX.Element[] => {
     return items.map(item => (
       <div key={item.path}>
         <div
-          className={`flex items-center space-x-2 py-1 px-2 cursor-pointer hover:bg-gray-700 ${
-            activeFile === item.path ? 'bg-blue-600' : ''
+          className={`flex items-center space-x-2 py-2 px-2 cursor-pointer hover:bg-gray-700 rounded-sm transition-colors ${
+            activeFile === item.path ? 'bg-blue-600 hover:bg-blue-700' : ''
           }`}
-          style={{ paddingLeft: `${level * 16 + 8}px` }}
+          style={{ paddingLeft: `${level * 12 + 8}px` }}
           onClick={() => {
             if (item.type === 'file') {
               setActiveFile(item.path)
               setActiveFileContent(item.content)
+            } else if (item.type === 'folder') {
+              toggleFolderExpansion(item.path)
             }
           }}
         >
           {item.type === 'folder' ? (
             <>
-              {item.expanded ? <ChevronDown className="h-4 w-4 text-gray-400" /> : <ChevronRight className="h-4 w-4 text-gray-400" />}
-              <Folder className="h-4 w-4 text-yellow-500" />
+              {item.expanded ?
+                <ChevronDown className="h-4 w-4 text-gray-400 hover:text-white transition-colors" /> :
+                <ChevronRight className="h-4 w-4 text-gray-400 hover:text-white transition-colors" />
+              }
+              <FolderOpen className={`h-4 w-4 ${item.expanded ? 'text-yellow-400' : 'text-yellow-500'}`} />
             </>
           ) : (
             <>
               <div className="w-4"></div>
-              <File className="h-4 w-4 text-blue-400" />
+              <File className={`h-4 w-4 ${
+                item.path.endsWith('.dart') ? 'text-blue-400' :
+                item.path.endsWith('.yaml') || item.path.endsWith('.yml') ? 'text-red-400' :
+                item.path.endsWith('.json') ? 'text-green-400' :
+                'text-gray-400'
+              }`} />
             </>
           )}
-          <span className="text-sm text-gray-300">{item.path.split('/').pop()}</span>
+          <span className={`text-sm truncate ${
+            activeFile === item.path ? 'text-white font-medium' : 'text-gray-300'
+          }`}>
+            {item.path.split('/').pop()}
+          </span>
+          {item.type === 'file' && activeFile === item.path && (
+            <div className="w-2 h-2 bg-blue-400 rounded-full ml-auto flex-shrink-0"></div>
+          )}
         </div>
         {item.type === 'folder' && item.expanded && item.children && (
-          <div>{renderFileTree(item.children, level + 1)}</div>
+          <div className="border-l border-gray-600 ml-3">
+            {renderFileTree(item.children, level + 1)}
+          </div>
         )}
       </div>
     ))
@@ -392,111 +431,250 @@ class _HomePageState extends State<HomePage> {
       {/* Main Content */}
       <div className="flex-1 bg-gray-900">
         <Allotment>
-          {/* Left: Chat + Files */}
+          {/* Left: Chat Section */}
           <Allotment.Pane minSize={350} maxSize={500}>
-            <Allotment vertical>
-              {/* Chat Messages */}
-              <Allotment.Pane minSize={200}>
-                <div className="h-full bg-gray-800 flex flex-col">
-                  <div className="p-4 border-b border-gray-700">
-                    <h3 className="text-white font-medium">Assistant</h3>
-                    <p className="text-gray-400 text-sm">Building your Flutter app</p>
-                  </div>
+            <div className="h-full bg-gray-800 flex flex-col">
+              <div className="p-4 border-b border-gray-700">
+                <h3 className="text-white font-medium">AI Assistant</h3>
+                <p className="text-gray-400 text-sm">Building your Flutter app</p>
+              </div>
 
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {messages.map(message => (
-                      <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[80%] p-3 rounded-lg ${
-                          message.type === 'user'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-700 text-gray-100'
-                        }`}>
-                          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                          <p className="text-xs mt-2 opacity-70">{formatTime(message.timestamp)}</p>
-                        </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {messages.map(message => (
+                  <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[85%] p-3 rounded-lg ${
+                      message.type === 'user'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-700 text-gray-100'
+                    }`}>
+                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      <p className="text-xs mt-2 opacity-70">{formatTime(message.timestamp)}</p>
+                    </div>
+                  </div>
+                ))}
+                {isGenerating && (
+                  <div className="flex justify-start">
+                    <div className="bg-gray-700 text-gray-100 p-3 rounded-lg">
+                      <div className="flex items-center space-x-2">
+                        <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+                        <span className="text-sm">Generating...</span>
                       </div>
-                    ))}
-                    {isGenerating && (
-                      <div className="flex justify-start">
-                        <div className="bg-gray-700 text-gray-100 p-3 rounded-lg">
-                          <div className="flex items-center space-x-2">
-                            <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-                            <span className="text-sm">Generating...</span>
-                          </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Chat Input */}
+              <div className="p-4 border-t border-gray-700">
+                <div className="flex space-x-2">
+                  <input
+                    type="text"
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                    placeholder="Ask me to modify your app..."
+                    className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={isGenerating}
+                  />
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={!inputMessage.trim() || isGenerating}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded-md transition-colors"
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Allotment.Pane>
+
+          {/* Center: Mobile App Simulator with Tabs */}
+          <Allotment.Pane minSize={300} maxSize={450}>
+            <div className="h-full bg-gray-800 flex flex-col">
+              <div className="p-4 border-b border-gray-700">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-white font-medium">Mobile Simulator</h3>
+                    <p className="text-gray-400 text-sm">{sessionId ? `Session: ${sessionId.slice(0, 8)}...` : 'Loading session...'}</p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-2 h-2 rounded-full ${
+                      sessionStatus === 'ready' ? 'bg-green-500' :
+                      sessionStatus === 'initializing' ? 'bg-yellow-500' : 'bg-red-500'
+                    }`}></div>
+                    <span className="text-xs text-gray-400">
+                      {sessionStatus === 'ready' ? 'Ready' :
+                       sessionStatus === 'initializing' ? 'Starting...' : 'Error'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* App Screen Tabs */}
+                <div className="flex space-x-1">
+                  {['main', 'settings', 'profile'].map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveTab(tab)}
+                      className={`px-3 py-1 text-xs rounded-md transition-colors capitalize ${
+                        activeTab === tab
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex-1 p-4 flex justify-center">
+                <div className="w-full max-w-sm h-full bg-gray-900 rounded-lg border-2 border-gray-600 overflow-hidden relative">
+                  {/* Mobile Frame */}
+                  <div className="absolute inset-4 bg-black rounded-lg overflow-hidden">
+                    {previewUrl && sessionStatus === 'ready' ? (
+                      <iframe
+                        src={`${previewUrl}${activeTab !== 'main' ? `#/${activeTab}` : ''}`}
+                        className="w-full h-full border-none"
+                        title={`Flutter App Preview - ${activeTab}`}
+                        sandbox="allow-scripts allow-same-origin"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <div className="text-center text-gray-400">
+                          {sessionStatus === 'initializing' && (
+                            <>
+                              <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                              <p className="text-sm">Starting Flutter app...</p>
+                            </>
+                          )}
+                          {sessionStatus === 'error' && (
+                            <>
+                              <div className="w-8 h-8 bg-red-500 rounded-full mx-auto mb-4 flex items-center justify-center">
+                                <span className="text-white text-sm">!</span>
+                              </div>
+                              <p className="text-sm">Failed to start preview</p>
+                            </>
+                          )}
                         </div>
                       </div>
                     )}
-                    <div ref={messagesEndRef} />
                   </div>
 
-                  {/* Chat Input */}
-                  <div className="p-4 border-t border-gray-700">
-                    <div className="flex space-x-2">
-                      <input
-                        type="text"
-                        value={inputMessage}
-                        onChange={(e) => setInputMessage(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                        placeholder="Ask me to modify your app..."
-                        className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        disabled={isGenerating}
-                      />
-                      <button
-                        onClick={handleSendMessage}
-                        disabled={!inputMessage.trim() || isGenerating}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded-md transition-colors"
-                      >
-                        <Send className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
+                  {/* Mobile Frame Elements */}
+                  <div className="absolute top-2 left-1/2 transform -translate-x-1/2 w-16 h-1 bg-gray-600 rounded-full"></div>
+                  <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 w-8 h-1 bg-gray-600 rounded-full"></div>
                 </div>
-              </Allotment.Pane>
-
-              {/* File Tree */}
-              <Allotment.Pane minSize={150}>
-                <div className="h-full bg-gray-800 border-t border-gray-700">
-                  <div className="p-4 border-b border-gray-700">
-                    <h3 className="text-white font-medium">Files</h3>
-                    <p className="text-gray-400 text-sm">{files.length} files</p>
-                  </div>
-                  <div className="overflow-y-auto">
-                    {renderFileTree(files)}
-                  </div>
-                </div>
-              </Allotment.Pane>
-            </Allotment>
-          </Allotment.Pane>
-
-          {/* Right: Code Editor */}
-          <Allotment.Pane minSize={400}>
-            <div className="h-full bg-gray-900">
-              {activeFile ? (
-                <div className="h-full flex flex-col">
-                  <div className="bg-gray-800 px-4 py-2 border-b border-gray-700">
-                    <div className="flex items-center space-x-2">
-                      <File className="h-4 w-4 text-blue-400" />
-                      <span className="text-white text-sm">{activeFile}</span>
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <CodeEditor
-                      value={activeFileContent}
-                      onChange={setActiveFileContent}
-                      language="dart"
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="h-full flex items-center justify-center">
-                  <div className="text-center text-gray-500">
-                    <File className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                    <p>Select a file to view its contents</p>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           </Allotment.Pane>
+
+          {/* Right: Collapsible Code Panel */}
+          {rightPanelCollapsed ? (
+            <div className="w-12 bg-gray-800 border-l border-gray-700 flex flex-col items-center py-4">
+              <button
+                onClick={() => setRightPanelCollapsed(false)}
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors mb-2"
+                title="Open Code Editor"
+              >
+                <Code className="h-5 w-5" />
+              </button>
+              <button
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors mb-2"
+                title="File Explorer"
+              >
+                <Folder className="h-5 w-5" />
+              </button>
+              <button
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
+                title="Settings"
+              >
+                <Settings className="h-5 w-5" />
+              </button>
+            </div>
+          ) : (
+            <Allotment.Pane minSize={400} maxSize={800}>
+              <Allotment vertical>
+                {/* File Tree */}
+                <Allotment.Pane minSize={200} maxSize={300}>
+                  <div className="h-full bg-gray-800 border-b border-gray-700">
+                    <div className="p-4 border-b border-gray-700">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-white font-medium">Project Files</h3>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-gray-400 text-xs">{files.length} files</span>
+                          <button
+                            onClick={() => setRightPanelCollapsed(true)}
+                            className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
+                            title="Collapse Panel"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="overflow-y-auto p-2">
+                      {renderFileTree(files)}
+                    </div>
+                  </div>
+                </Allotment.Pane>
+
+                {/* Code Editor */}
+                <Allotment.Pane minSize={300}>
+                  <div className="h-full bg-gray-900">
+                    {activeFile ? (
+                      <div className="h-full flex flex-col">
+                        <div className="bg-gray-800 px-4 py-2 border-b border-gray-700">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-2">
+                              <File className="h-4 w-4 text-blue-400" />
+                              <span className="text-white text-sm">{activeFile}</span>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <button className="text-gray-400 hover:text-white text-xs px-2 py-1 rounded hover:bg-gray-700 transition-colors">
+                                Save
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setActiveFile('')
+                                  setActiveFileContent('')
+                                }}
+                                className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700 transition-colors"
+                                title="Close File"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                          <CodeEditor
+                            value={activeFileContent}
+                            onChange={setActiveFileContent}
+                            language="dart"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="h-full flex items-center justify-center">
+                        <div className="text-center text-gray-500">
+                          <File className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                          <p className="text-lg font-medium mb-2">No File Selected</p>
+                          <p className="text-sm">Select a file from the project tree to view its contents</p>
+                          <button
+                            onClick={() => setRightPanelCollapsed(true)}
+                            className="mt-4 text-xs text-gray-400 hover:text-white underline"
+                          >
+                            Collapse panel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </Allotment.Pane>
+              </Allotment>
+            </Allotment.Pane>
+          )}
         </Allotment>
       </div>
     </div>

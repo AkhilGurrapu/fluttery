@@ -14,6 +14,8 @@ import apiRoutes from './routes/api'
 import generateRoutes from './routes/generate'
 import previewRoutes from './routes/preview'
 import exportRoutes from './routes/export'
+import hotReloadRoutes from './routes/hotReload'
+import sessionsRoutes from './routes/sessions'
 
 dotenv.config()
 
@@ -70,6 +72,8 @@ app.use('/api', apiRoutes)
 app.use('/api/generate', generateRoutes)
 app.use('/api/preview', previewRoutes)
 app.use('/api/export', exportRoutes)
+app.use('/api/hot-reload', hotReloadRoutes)
+app.use('/api/sessions', sessionsRoutes)
 
 // Socket.IO for real-time updates
 io.on('connection', (socket) => {
