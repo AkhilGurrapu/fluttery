@@ -334,7 +334,7 @@ flutter:
 
   private async buildForWeb(projectPath: string): Promise<string> {
     try {
-      await execAsync('flutter build web --web-renderer html', { cwd: projectPath })
+      await execAsync('flutter build web', { cwd: projectPath })
       return path.join(projectPath, 'build', 'web')
     } catch (error) {
       logger.error(`Error building for web:`, error)

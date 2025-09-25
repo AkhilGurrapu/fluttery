@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import LandingPage from '@/components/LandingPage'
-import DevEnvironment from '@/components/DevEnvironment'
+import ChatDevEnvironment from '@/components/ChatDevEnvironment'
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<'landing' | 'dev'>('landing')
@@ -26,7 +26,7 @@ export default function Home() {
   }
 
   return (
-    <DevEnvironment
+    <ChatDevEnvironment
       initialPrompt={currentPrompt}
       appType={currentAppType}
       onBack={handleBackToLanding}

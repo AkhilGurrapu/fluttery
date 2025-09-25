@@ -32,30 +32,42 @@ export interface CodeGenerationResponse {
   }>
 }
 
-const FLUTTER_SYSTEM_PROMPT = `You are an expert Flutter developer and code generator. Your job is to convert plain English descriptions into high-quality, production-ready Flutter code.
+const FLUTTER_SYSTEM_PROMPT = `You are an expert Flutter developer and code generator. Your job is to convert plain English descriptions into high-quality, production-ready Flutter applications with proper file structure.
+
+IMPORTANT: You must respond with a JSON object containing multiple files for a complete Flutter project structure.
+
+Response format:
+{
+  "explanation": "Brief explanation of what you're building",
+  "files": [
+    {
+      "path": "lib/main.dart",
+      "content": "// Flutter code here"
+    },
+    {
+      "path": "lib/screens/home_screen.dart",
+      "content": "// Screen code here"
+    }
+    // ... more files as needed
+  ],
+  "dependencies": ["package1", "package2"]
+}
 
 Key guidelines:
-1. Generate complete, runnable Flutter code
+1. Generate complete, runnable Flutter code with proper file structure
 2. Use modern Flutter best practices (Flutter 3.x)
-3. Include proper imports and dependencies
-4. Follow Material Design principles
-5. Add proper error handling and loading states
-6. Make code responsive and mobile-friendly
-7. Include comments for complex logic
-8. Use proper state management (setState, Provider, etc.)
+3. Create separate files for screens, widgets, models, services
+4. Include proper imports and dependencies
+5. Follow Material Design principles
+6. Add proper error handling and loading states
+7. Make code responsive and mobile-friendly
+8. Use proper state management (setState, Provider, Bloc, etc.)
 9. Ensure code is well-structured with proper separation of concerns
 10. Add Firebase integration when requested
+11. Include models, services, and utilities in separate files
+12. Create reusable widgets in separate files
 
-Always respond with valid Dart/Flutter code that can be directly used in a Flutter project.
-
-For complex apps, structure the code with:
-- Main app entry point
-- Separate screens/pages
-- Reusable widgets
-- Models/data classes
-- Services for API calls or Firebase
-
-When modifying existing code, make minimal changes while adding the requested functionality.`
+Always create a proper Flutter project structure with multiple files, not just a single main.dart file.`
 
 const FLUTTER_CODE_EXAMPLES = `
 Example 1 - Simple Counter App:
@@ -234,25 +246,51 @@ export class AIService {
 
       const result = await model.generateContent(prompt)
       const response = await result.response
-      const generatedContent = response.text()
+      let generatedContent = response.text()
 
       if (!generatedContent) {
         throw new Error('No code generated from AI service')
       }
 
-      // Extract code from markdown code blocks
+      // Clean up the response and extract JSON
+      generatedContent = generatedContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+
+      try {
+        // Try to parse as JSON first
+        const jsonResponse = JSON.parse(generatedContent)
+
+        if (jsonResponse.files && Array.isArray(jsonResponse.files)) {
+          // Return structured response with multiple files
+          logger.info('Flutter project generated successfully with Gemini 2.0 Flash')
+
+          return {
+            code: jsonResponse.files.find((f: any) => f.path === 'lib/main.dart')?.content || jsonResponse.files[0]?.content || '',
+            dependencies: jsonResponse.dependencies || [],
+            explanation: jsonResponse.explanation || `Generated Flutter project for: ${request.prompt}`,
+            files: jsonResponse.files || []
+          }
+        }
+      } catch (jsonError) {
+        logger.warn('Failed to parse JSON response, falling back to text parsing')
+      }
+
+      // Fallback: Extract code from markdown code blocks
       const codeMatch = generatedContent.match(/```(?:dart|flutter)?\n([\s\S]*?)\n```/)
       const code = codeMatch ? codeMatch[1] : generatedContent
 
       // Extract dependencies from code
       const dependencies = this.extractDependencies(code)
 
-      logger.info('Flutter code generated successfully with Gemini 2.0 Flash')
+      logger.info('Flutter code generated successfully with Gemini 2.0 Flash (fallback)')
 
       return {
         code: code.trim(),
         dependencies,
-        explanation: `Generated Flutter code for: ${request.prompt}`
+        explanation: `Generated Flutter code for: ${request.prompt}`,
+        files: [{
+          path: 'lib/main.dart',
+          content: code.trim()
+        }]
       }
 
     } catch (error) {
