@@ -101,7 +101,7 @@ export default function ChatDevEnvironment({ initialPrompt, appType, onBack }: C
         const successMessage: Message = {
           id: (Date.now() + 2).toString(),
           type: 'assistant',
-          content: `Perfect! I've created your Flutter app session and generated your initial app.\n\nYour app is now running at: ${sessionData.session.previewUrl}\n\nThe app is ready to run! You can see the preview in the right panel and make changes through this chat.`,
+          content: `🎉 **Flutter Session Created!**\n\nI've initialized your Flutter app with multi-agent capabilities:\n\n🤖 **Design Agent**: Ready for UI/UX creation\n⚡ **Code Agent**: Ready for Flutter development\n🧪 **Testing Agent**: Ready for quality assurance\n\nYour app preview: ${sessionData.session.previewUrl}\n\n**Next:** Describe what you want to build and I'll coordinate the AI agents to create your app!`,
           timestamp: new Date()
         }
 
@@ -122,7 +122,7 @@ export default function ChatDevEnvironment({ initialPrompt, appType, onBack }: C
       const errorMessage: Message = {
         id: (Date.now() + 3).toString(),
         type: 'assistant',
-        content: 'I apologize, but I encountered an error setting up your Flutter session. This might be due to server configuration issues. Let me create a basic template for you to get started.',
+        content: '⚠️ **Session Setup Issue**\n\nI encountered an error initializing the Flutter session. This might be due to:\n\n• Server configuration\n• Port conflicts\n• API limitations\n\nLet me create a basic template for you to get started while we resolve this.',
         timestamp: new Date()
       }
       setMessages(prev => [...prev.slice(0, -1), errorMessage])
@@ -238,6 +238,45 @@ class _HomePageState extends State<HomePage> {
 }`
   }
 
+  const handleContinueExecution = async () => {
+    if (!sessionId) return
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/continue`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success && data.status === 'completed') {
+          // Update the last message with completion status
+          const completionMessage: Message = {
+            id: (Date.now() + 4).toString(),
+            type: 'assistant',
+            content: `✅ **Multi-Agent Processing Complete!**\n\nAll agents have finished their tasks. Your Flutter app has been generated and is ready to use!\n\nPreview: ${previewUrl}`,
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev.slice(0, -1), completionMessage])
+
+          // Update files if available
+          if (data.data && data.data.code && data.data.code.files) {
+            setFiles(createFileTree(data.data.code.files))
+          }
+        } else if (data.success && data.status !== 'completed') {
+          // Continue polling
+          setTimeout(() => {
+            handleContinueExecution()
+          }, 3000)
+        }
+      }
+    } catch (error) {
+      console.error('Error continuing execution:', error)
+    }
+  }
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isGenerating || !sessionId) return
 
@@ -275,37 +314,65 @@ class _HomePageState extends State<HomePage> {
       if (response.ok) {
         const data = await response.json()
 
+        let successContent = ''
+        if (data.success) {
+          if (data.status === 'completed') {
+            successContent = `✅ **Multi-Agent System Complete!**\n\nI've successfully built your Flutter app using specialized AI agents:\n\n🎨 **Design Agent**: Created UI/UX specifications\n💻 **Code Agent**: Generated Flutter code with best practices\n🧪 **Testing Agent**: Created comprehensive test suite\n\nYour app is ready and has been hot reloaded!\n\nPreview: ${previewUrl}`
+
+            // If we have generated files from multi-agent system
+            if (data.data && data.data.code && data.data.code.files) {
+              setFiles(createFileTree(data.data.code.files))
+              // Update active file if it exists
+              const currentFile = data.data.code.files.find((f: any) => f.path === activeFile)
+              if (currentFile) {
+                setActiveFileContent(currentFile.content)
+              }
+            }
+          } else {
+            successContent = `⚙️ **Multi-Agent Processing...**\n\nStatus: ${data.status}\nProgress: ${data.progress?.completedPlans || 0}/${data.progress?.totalPlans || 0} tasks\nCurrent Agent: ${data.progress?.currentAgent || 'Coordinating'}\n\nThe specialized agents are working on your request...`
+
+            // Continue polling for updates if not completed
+            setTimeout(() => {
+              handleContinueExecution()
+            }, 3000)
+          }
+        } else {
+          successContent = `❌ **Processing Failed**\n\nError: ${data.error}\n\nThe multi-agent system encountered an issue. This might be due to API configuration. Let me create a basic template for you instead.`
+
+          // Fallback to basic template
+          const basicTemplate = getBasicTemplate()
+          setFiles(createFileTree([{ path: 'lib/main.dart', content: basicTemplate }]))
+          setActiveFile('lib/main.dart')
+          setActiveFileContent(basicTemplate)
+        }
+
         const successMessage: Message = {
           id: (Date.now() + 2).toString(),
           type: 'assistant',
-          content: `I've updated your Flutter app based on your request!\n\nYour changes have been applied and the app has been hot reloaded.\n\nYou can see the updated preview at: ${previewUrl}`,
+          content: successContent,
           timestamp: new Date(),
           files: data.files || []
         }
 
         setMessages(prev => [...prev.slice(0, -1), successMessage])
-
-        // Update files if we got file information
-        if (data.files && data.files.length > 0) {
-          setFiles(createFileTree(data.files))
-          // Update active file if it exists in the new files
-          const currentFile = data.files.find((f: any) => f.path === activeFile)
-          if (currentFile) {
-            setActiveFileContent(currentFile.content)
-          }
-        }
       } else {
-        throw new Error(`Failed to update code: ${response.statusText}`)
+        throw new Error(`Failed to process request: ${response.statusText}`)
       }
     } catch (error) {
-      console.error('Error updating code:', error)
+      console.error('Error processing multi-agent request:', error)
       const errorMessage: Message = {
         id: (Date.now() + 3).toString(),
         type: 'assistant',
-        content: `I encountered an error processing your request: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again or check if the session is still active.`,
+        content: `🔧 **Multi-Agent System Error**\n\nI encountered an issue: ${error instanceof Error ? error.message : 'Unknown error'}\n\nThis might be due to server configuration or API limitations. Let me create a basic template for you to get started.`,
         timestamp: new Date()
       }
       setMessages(prev => [...prev.slice(0, -1), errorMessage])
+
+      // Fallback to basic template
+      const basicTemplate = getBasicTemplate()
+      setFiles(createFileTree([{ path: 'lib/main.dart', content: basicTemplate }]))
+      setActiveFile('lib/main.dart')
+      setActiveFileContent(basicTemplate)
     } finally {
       setIsGenerating(false)
     }
@@ -431,33 +498,40 @@ class _HomePageState extends State<HomePage> {
       {/* Main Content */}
       <div className="flex-1 bg-gray-900">
         <Allotment>
-          {/* Left: Chat Section */}
-          <Allotment.Pane minSize={350} maxSize={500}>
-            <div className="h-full bg-gray-800 flex flex-col">
-              <div className="p-4 border-b border-gray-700">
-                <h3 className="text-white font-medium">AI Assistant</h3>
-                <p className="text-gray-400 text-sm">Building your Flutter app</p>
+          {/* Left: Chat Section - Super Highlighted */}
+          <Allotment.Pane minSize={400} maxSize={600} preferredSize={480}>
+            <div className="h-full bg-gradient-to-br from-gray-800 via-gray-800 to-gray-700 flex flex-col border-r-2 border-blue-500/30">
+              <div className="p-4 border-b border-blue-500/20 bg-gradient-to-r from-blue-900/20 to-purple-900/20">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                    <span className="text-white font-bold text-lg">🤖</span>
+                  </div>
+                  <div>
+                    <h3 className="text-white font-bold text-lg">AI Assistant</h3>
+                    <p className="text-blue-300 text-sm font-medium">Multi-Agent Flutter Builder</p>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-b from-gray-800/50 to-gray-900/50">
                 {messages.map(message => (
                   <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] p-3 rounded-lg ${
+                    <div className={`max-w-[85%] p-4 rounded-2xl shadow-lg backdrop-blur-sm ${
                       message.type === 'user'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-700 text-gray-100'
+                        ? 'bg-gradient-to-r from-blue-600 via-blue-700 to-purple-600 text-white border border-blue-400/30'
+                        : 'bg-gradient-to-r from-gray-700 via-gray-600 to-gray-700 text-gray-100 border border-gray-500/30'
                     }`}>
-                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                      <p className="text-xs mt-2 opacity-70">{formatTime(message.timestamp)}</p>
+                      <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                      <p className="text-xs mt-3 opacity-75 font-medium">{formatTime(message.timestamp)}</p>
                     </div>
                   </div>
                 ))}
                 {isGenerating && (
                   <div className="flex justify-start">
-                    <div className="bg-gray-700 text-gray-100 p-3 rounded-lg">
-                      <div className="flex items-center space-x-2">
-                        <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-                        <span className="text-sm">Generating...</span>
+                    <div className="bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 text-white p-4 rounded-2xl shadow-lg border border-blue-400/30">
+                      <div className="flex items-center space-x-3">
+                        <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
+                        <span className="text-sm font-medium">Multi-Agent System Processing...</span>
                       </div>
                     </div>
                   </div>
@@ -466,44 +540,55 @@ class _HomePageState extends State<HomePage> {
               </div>
 
               {/* Chat Input */}
-              <div className="p-4 border-t border-gray-700">
-                <div className="flex space-x-2">
+              <div className="p-6 border-t border-blue-500/20 bg-gradient-to-r from-gray-800 via-gray-700 to-gray-800">
+                <div className="flex space-x-3">
                   <input
                     type="text"
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder="Ask me to modify your app..."
-                    className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Describe your app or ask me to modify it..."
+                    className="flex-1 bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-gradient-to-r focus:from-gray-500 focus:to-gray-600 border border-gray-500 placeholder-gray-300"
                     disabled={isGenerating}
                   />
                   <button
                     onClick={handleSendMessage}
                     disabled={!inputMessage.trim() || isGenerating}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded-md transition-colors"
+                    className="px-5 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-600 text-white rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg"
                   >
-                    <Send className="h-4 w-4" />
+                    <Send className="h-5 w-5" />
                   </button>
                 </div>
               </div>
             </div>
           </Allotment.Pane>
 
-          {/* Center: Mobile App Simulator with Tabs */}
-          <Allotment.Pane minSize={300} maxSize={450}>
-            <div className="h-full bg-gray-800 flex flex-col">
-              <div className="p-4 border-b border-gray-700">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-white font-medium">Mobile Simulator</h3>
-                    <p className="text-gray-400 text-sm">{sessionId ? `Session: ${sessionId.slice(0, 8)}...` : 'Loading session...'}</p>
+          {/* Center: Mobile App Simulator - Main Highlight */}
+          <Allotment.Pane minSize={380} maxSize={600} preferredSize={500}>
+            <div className="h-full bg-gradient-to-b from-gray-800 to-gray-900 flex flex-col border-x border-gray-600">
+              <div className="p-6 border-b border-gray-600 bg-gradient-to-r from-gray-800 via-gray-700 to-gray-800">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-blue-500 rounded-xl flex items-center justify-center">
+                      <Smartphone className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-white font-bold text-xl">Mobile Simulator</h3>
+                      <p className="text-gray-300 text-sm font-medium">{sessionId ? `Session: ${sessionId.slice(0, 8)}...` : 'Loading session...'}</p>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <div className={`w-2 h-2 rounded-full ${
+                  <div className={`flex items-center space-x-3 px-3 py-2 rounded-full border ${
+                    sessionStatus === 'ready' ? 'bg-green-500/20 border-green-500/30' :
+                    sessionStatus === 'initializing' ? 'bg-yellow-500/20 border-yellow-500/30' : 'bg-red-500/20 border-red-500/30'
+                  }`}>
+                    <div className={`w-3 h-3 rounded-full animate-pulse ${
                       sessionStatus === 'ready' ? 'bg-green-500' :
                       sessionStatus === 'initializing' ? 'bg-yellow-500' : 'bg-red-500'
                     }`}></div>
-                    <span className="text-xs text-gray-400">
+                    <span className={`text-sm font-medium ${
+                      sessionStatus === 'ready' ? 'text-green-300' :
+                      sessionStatus === 'initializing' ? 'text-yellow-300' : 'text-red-300'
+                    }`}>
                       {sessionStatus === 'ready' ? 'Ready' :
                        sessionStatus === 'initializing' ? 'Starting...' : 'Error'}
                     </span>
@@ -511,15 +596,15 @@ class _HomePageState extends State<HomePage> {
                 </div>
 
                 {/* App Screen Tabs */}
-                <div className="flex space-x-1">
+                <div className="flex space-x-2 p-1 bg-gray-700/50 rounded-lg border border-gray-600">
                   {['main', 'settings', 'profile'].map((tab) => (
                     <button
                       key={tab}
                       onClick={() => setActiveTab(tab)}
-                      className={`px-3 py-1 text-xs rounded-md transition-colors capitalize ${
+                      className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 capitalize ${
                         activeTab === tab
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg transform scale-105'
+                          : 'text-gray-300 hover:text-white hover:bg-gray-600/50'
                       }`}
                     >
                       {tab}
@@ -528,10 +613,10 @@ class _HomePageState extends State<HomePage> {
                 </div>
               </div>
 
-              <div className="flex-1 p-4 flex justify-center">
-                <div className="w-full max-w-sm h-full bg-gray-900 rounded-lg border-2 border-gray-600 overflow-hidden relative">
+              <div className="flex-1 p-8 flex justify-center bg-gradient-to-b from-gray-900 to-black">
+                <div className="w-full max-w-md h-full bg-gradient-to-b from-gray-800 to-gray-900 rounded-2xl border-4 border-gray-500 overflow-hidden relative shadow-2xl">
                   {/* Mobile Frame */}
-                  <div className="absolute inset-4 bg-black rounded-lg overflow-hidden">
+                  <div className="absolute inset-6 bg-black rounded-xl overflow-hidden border border-gray-700">
                     {previewUrl && sessionStatus === 'ready' ? (
                       <iframe
                         src={`${previewUrl}${activeTab !== 'main' ? `#/${activeTab}` : ''}`}
@@ -569,15 +654,15 @@ class _HomePageState extends State<HomePage> {
             </div>
           </Allotment.Pane>
 
-          {/* Right: Collapsible Code Panel */}
+          {/* Right: Collapsible Code Panel - Extreme Right */}
           {rightPanelCollapsed ? (
-            <div className="w-12 bg-gray-800 border-l border-gray-700 flex flex-col items-center py-4">
+            <div className="w-16 bg-gradient-to-b from-gray-800 to-gray-900 border-l-2 border-gray-600 flex flex-col items-center py-6">
               <button
                 onClick={() => setRightPanelCollapsed(false)}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors mb-2"
+                className="p-3 text-gray-400 hover:text-white hover:bg-gradient-to-r hover:from-blue-600 hover:to-purple-600 rounded-lg transition-all duration-300 mb-3 transform hover:scale-105"
                 title="Open Code Editor"
               >
-                <Code className="h-5 w-5" />
+                <Code className="h-6 w-6" />
               </button>
               <button
                 className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors mb-2"
@@ -593,7 +678,7 @@ class _HomePageState extends State<HomePage> {
               </button>
             </div>
           ) : (
-            <Allotment.Pane minSize={400} maxSize={800}>
+            <Allotment.Pane minSize={500} maxSize={900} preferredSize={650}>
               <Allotment vertical>
                 {/* File Tree */}
                 <Allotment.Pane minSize={200} maxSize={300}>

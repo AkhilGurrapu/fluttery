@@ -1,15 +1,34 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
 import { logger } from '../utils/logger'
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '')
-const model = genAI.getGenerativeModel({
-  model: "gemini-1.5-flash",
-  generationConfig: {
-    temperature: 0.7,
-    topP: 0.8,
-    topK: 40,
-    maxOutputTokens: 8192,
-  },
+const API_KEY = process.env.GEMINI_API_KEY || ''
+const modelName = 'gemini-2.0-flash-exp'
+
+// Validate API key on startup
+function validateApiKey(): void {
+  if (!API_KEY) {
+    logger.error('GEMINI_API_KEY environment variable not found')
+    logger.warn('Please add your Google Gemini API key to the .env file')
+    logger.info('Get your API key from: https://makersuite.google.com/app/apikey')
+    return
+  }
+
+  if (API_KEY.length < 30 || API_KEY.startsWith('AAIzaSy')) {
+    logger.error('GEMINI_API_KEY appears to be a placeholder/invalid key')
+    logger.warn(`Current key: ${API_KEY.substring(0, 20)}...`)
+    logger.info('Please replace with a valid Google Gemini API key from: https://makersuite.google.com/app/apikey')
+    logger.info('A valid key should start with "AIza" and be much longer')
+    return
+  }
+
+  logger.info('🔑 Gemini API key validated successfully')
+}
+
+// Initialize with API key validation
+validateApiKey()
+
+const genAI = new GoogleGenAI({
+  apiKey: API_KEY
 })
 
 export interface CodeGenerationRequest {
@@ -244,9 +263,17 @@ export class AIService {
         prompt += `Create a Flutter app that: ${request.prompt}\n\nProvide complete, runnable Flutter code with proper structure and best practices.`
       }
 
-      const result = await model.generateContent(prompt)
-      const response = await result.response
-      let generatedContent = response.text()
+      const result = await genAI.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+          temperature: 0.7,
+          topP: 0.8,
+          topK: 40,
+          maxOutputTokens: 8192
+        }
+      })
+      let generatedContent = result.text
 
       if (!generatedContent) {
         throw new Error('No code generated from AI service')
@@ -295,6 +322,24 @@ export class AIService {
 
     } catch (error) {
       logger.error('Error generating Flutter code:', error)
+
+      // Provide specific error messages for common issues
+      if (error instanceof Error) {
+        if (error.message.includes('403')) {
+          const detailedMessage = 'Google Gemini API authentication failed. Please check your API key in the .env file. Get a valid key from: https://makersuite.google.com/app/apikey'
+          logger.error('API Key Error:', detailedMessage)
+          throw new Error(`API Authentication Error: Invalid or missing Gemini API key. ${detailedMessage}`)
+        }
+
+        if (error.message.includes('quota') || error.message.includes('limit')) {
+          throw new Error(`API Quota Error: ${error.message}. Please check your Google Cloud billing or API quotas.`)
+        }
+
+        if (error.message.includes('network') || error.message.includes('timeout')) {
+          throw new Error(`Network Error: ${error.message}. Please check your internet connection.`)
+        }
+      }
+
       throw new Error(`Failed to generate Flutter code: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
@@ -317,9 +362,17 @@ export class AIService {
     try {
       const prompt = `${FLUTTER_SYSTEM_PROMPT}\n\nHere is Flutter code:\n\`\`\`dart\n${code}\n\`\`\`\n\nPlease improve it by: ${instruction}\n\nReturn only the improved Flutter code.`
 
-      const result = await model.generateContent(prompt)
-      const response = await result.response
-      const improvedContent = response.text()
+      const result = await genAI.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+          temperature: 0.7,
+          topP: 0.8,
+          topK: 40,
+          maxOutputTokens: 8192
+        }
+      })
+      const improvedContent = result.text
 
       if (!improvedContent) {
         throw new Error('No improved code generated')
@@ -338,10 +391,18 @@ export class AIService {
     try {
       const prompt = `You are a Flutter expert. Explain Flutter code in a clear, educational way.\n\nPlease explain this Flutter code:\n\`\`\`dart\n${code}\n\`\`\``
 
-      const result = await model.generateContent(prompt)
-      const response = await result.response
+      const result = await genAI.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+          temperature: 0.7,
+          topP: 0.8,
+          topK: 40,
+          maxOutputTokens: 8192
+        }
+      })
 
-      return response.text() || 'Unable to explain code'
+      return result.text || 'Unable to explain code'
 
     } catch (error) {
       logger.error('Error explaining code:', error)
